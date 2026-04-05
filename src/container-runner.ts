@@ -24,6 +24,7 @@ const copilotEnv = readEnvFile([
   'NANOCLAW_SDK',
   'COPILOT_MODEL',
   'GITHUB_TOKEN',
+  'NANOCLAW_SANDBOX',
 ]);
 import {
   CONTAINER_RUNTIME_BIN,
@@ -296,6 +297,15 @@ async function buildContainerArgs(
   const copilotModel = process.env.COPILOT_MODEL || copilotEnv.COPILOT_MODEL;
   if (copilotModel) {
     args.push('-e', `COPILOT_MODEL=${copilotModel}`);
+  }
+
+  // Pass sandbox configuration for Copilot SDK tool isolation
+  const nanoclavSandbox = process.env.NANOCLAW_SANDBOX || copilotEnv.NANOCLAW_SANDBOX;
+  if (nanoclavSandbox) {
+    args.push('-e', `NANOCLAW_SANDBOX=${nanoclavSandbox}`);
+    // Enable the sandbox feature flag in Copilot CLI
+    args.push('-e', 'SANDBOX=true');
+    args.push('-e', 'COPILOT_CLI_ENABLED_FEATURE_FLAGS=SANDBOX');
   }
 
   // Copilot SDK talks to GitHub/Copilot endpoints, not Anthropic.

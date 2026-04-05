@@ -126,6 +126,7 @@ export async function runCopilotQuery(
 
   // Build session config
   const model = process.env.COPILOT_MODEL || 'gpt-4.1';
+  const sandboxEnabled = process.env.NANOCLAW_SANDBOX === '1' || process.env.NANOCLAW_SANDBOX === 'true';
   const sessionConfig: SessionConfig = {
     model,
     streaming: true,
@@ -133,9 +134,10 @@ export async function runCopilotQuery(
     mcpServers,
     onPermissionRequest: approveAll,
     ...(systemMessage ? { systemMessage: { content: systemMessage } } : {}),
+    ...(sandboxEnabled ? { sandbox: { enabled: true } } : {}),
   };
 
-  log(`Creating Copilot session (model: ${model}, resume: ${sessionId || 'new'})`);
+  log(`Creating Copilot session (model: ${model}, resume: ${sessionId || 'new'}, sandbox: ${sandboxEnabled})`);
 
   // Create or resume session
   const session = sessionId
