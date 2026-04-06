@@ -16,6 +16,7 @@ import {
   type MCPServerConfig,
 } from '@github/copilot-sdk';
 import fs from 'fs';
+import path from 'path';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -94,9 +95,10 @@ export async function runCopilotQuery(
   const client = getCopilotClient();
 
   // Log authentication method
+  const homeDir = process.env.NANOCLAW_HOME ?? '/home/node';
   if (process.env.GITHUB_TOKEN) {
     log('Copilot auth: using GITHUB_TOKEN env var');
-  } else if (fs.existsSync('/home/node/.copilot')) {
+  } else if (fs.existsSync(path.join(homeDir, '.copilot'))) {
     log('Copilot auth: using OAuth credentials from ~/.copilot/');
   } else {
     log('Warning: No Copilot authentication found (set GITHUB_TOKEN or run copilot auth login)');
@@ -118,7 +120,8 @@ export async function runCopilotQuery(
   };
 
   // Load global CLAUDE.md as system context
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalDir = process.env.NANOCLAW_WORKSPACE_GLOBAL ?? '/workspace/global';
+  const globalClaudeMdPath = path.join(globalDir, 'CLAUDE.md');
   let systemMessage: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     systemMessage = fs.readFileSync(globalClaudeMdPath, 'utf-8');
@@ -130,7 +133,7 @@ export async function runCopilotQuery(
   const sessionConfig: SessionConfig = {
     model,
     streaming: true,
-    workingDirectory: '/workspace/group',
+    workingDirectory: process.env.NANOCLAW_WORKSPACE_GROUP ?? '/workspace/group',
     mcpServers,
     onPermissionRequest: approveAll,
     ...(systemMessage ? { systemMessage: { content: systemMessage } } : {}),

@@ -61,7 +61,16 @@ interface SDKUserMessage {
   session_id: string;
 }
 
-const IPC_INPUT_DIR = '/workspace/ipc/input';
+// Resolve workspace paths from env vars (Windows/mxc) or fall back to Docker defaults
+const WORKSPACE_GROUP = process.env.NANOCLAW_WORKSPACE_GROUP ?? '/workspace/group';
+const WORKSPACE_PROJECT = process.env.NANOCLAW_WORKSPACE_PROJECT ?? '/workspace/project';
+const WORKSPACE_GLOBAL = process.env.NANOCLAW_WORKSPACE_GLOBAL ?? '/workspace/global';
+const WORKSPACE_IPC = process.env.NANOCLAW_WORKSPACE_IPC ?? '/workspace/ipc';
+const WORKSPACE_EXTRA = process.env.NANOCLAW_WORKSPACE_EXTRA ?? '/workspace/extra';
+const HOME_DIR = process.env.NANOCLAW_HOME ?? '/home/node';
+const TEMP_DIR = process.env.NANOCLAW_TEMP ?? (process.platform === 'win32' ? (process.env.TEMP ?? 'C:\\Temp') : '/tmp');
+
+const IPC_INPUT_DIR = path.join(WORKSPACE_IPC, 'input');
 const IPC_INPUT_CLOSE_SENTINEL = path.join(IPC_INPUT_DIR, '_close');
 const IPC_POLL_MS = 500;
 
@@ -189,7 +198,7 @@ function createPreCompactHook(assistantName?: string): HookCallback {
       const summary = getSessionSummary(sessionId, transcriptPath);
       const name = summary ? sanitizeFilename(summary) : generateFallbackName();
 
-      const conversationsDir = '/workspace/group/conversations';
+      const conversationsDir = path.join(WORKSPACE_GROUP, 'conversations');
       fs.mkdirSync(conversationsDir, { recursive: true });
 
       const date = new Date().toISOString().split('T')[0];
@@ -420,19 +429,18 @@ async function runQuery(
   let resultCount = 0;
 
   // Load global CLAUDE.md as additional system context (shared across all groups)
-  const globalClaudeMdPath = '/workspace/global/CLAUDE.md';
+  const globalClaudeMdPath = path.join(WORKSPACE_GLOBAL, 'CLAUDE.md');
   let globalClaudeMd: string | undefined;
   if (!containerInput.isMain && fs.existsSync(globalClaudeMdPath)) {
     globalClaudeMd = fs.readFileSync(globalClaudeMdPath, 'utf-8');
   }
 
-  // Discover additional directories mounted at /workspace/extra/*
+  // Discover additional directories mounted at extra workspace
   // These are passed to the SDK so their CLAUDE.md files are loaded automatically
   const extraDirs: string[] = [];
-  const extraBase = '/workspace/extra';
-  if (fs.existsSync(extraBase)) {
-    for (const entry of fs.readdirSync(extraBase)) {
-      const fullPath = path.join(extraBase, entry);
+  if (fs.existsSync(WORKSPACE_EXTRA)) {
+    for (const entry of fs.readdirSync(WORKSPACE_EXTRA)) {
+      const fullPath = path.join(WORKSPACE_EXTRA, entry);
       if (fs.statSync(fullPath).isDirectory()) {
         extraDirs.push(fullPath);
       }
@@ -445,7 +453,7 @@ async function runQuery(
   for await (const message of query({
     prompt: stream,
     options: {
-      cwd: '/workspace/group',
+      cwd: WORKSPACE_GROUP,
       additionalDirectories: extraDirs.length > 0 ? extraDirs : undefined,
       resume: sessionId,
       resumeSessionAt: resumeAt,
@@ -559,13 +567,16 @@ interface ScriptResult {
 const SCRIPT_TIMEOUT_MS = 30_000;
 
 async function runScript(script: string): Promise<ScriptResult | null> {
-  const scriptPath = '/tmp/task-script.sh';
+  const scriptPath = path.join(TEMP_DIR, 'task-script.sh');
   fs.writeFileSync(scriptPath, script, { mode: 0o755 });
+
+  const shell = process.platform === 'win32' ? 'powershell.exe' : 'bash';
+  const shellArgs = process.platform === 'win32' ? ['-File', scriptPath] : [scriptPath];
 
   return new Promise((resolve) => {
     execFile(
-      'bash',
-      [scriptPath],
+      shell,
+      shellArgs,
       {
         timeout: SCRIPT_TIMEOUT_MS,
         maxBuffer: 1024 * 1024,
@@ -611,10 +622,18 @@ async function main(): Promise<void> {
   let containerInput: ContainerInput;
 
   try {
-    const stdinData = await readStdin();
-    containerInput = JSON.parse(stdinData);
+    // Support file-based input for mxc (PTY mode has no stdin EOF)
+    const inputFile = process.env.NANOCLAW_INPUT_FILE;
+    let inputData: string;
+    if (inputFile && fs.existsSync(inputFile)) {
+      inputData = fs.readFileSync(inputFile, 'utf-8');
+      try { fs.unlinkSync(inputFile); } catch { /* may fail in sandbox */ }
+    } else {
+      inputData = await readStdin();
+    }
+    containerInput = JSON.parse(inputData);
     try {
-      fs.unlinkSync('/tmp/input.json');
+      fs.unlinkSync(path.join(TEMP_DIR, 'input.json'));
     } catch {
       /* may not exist */
     }
