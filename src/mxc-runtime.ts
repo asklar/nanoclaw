@@ -68,7 +68,7 @@ interface ContainerOutput {
   error?: string;
 }
 
-interface MxcSpawnConfig {
+export interface MxcSpawnConfig {
   groupFolder: string;
   groupDir: string;
   ipcDir: string;

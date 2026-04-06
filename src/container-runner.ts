@@ -25,6 +25,7 @@ const copilotEnv = readEnvFile([
   'COPILOT_MODEL',
   'GITHUB_TOKEN',
   'NANOCLAW_SANDBOX',
+  'NANOCLAW_RUNTIME',
 ]);
 import {
   CONTAINER_RUNTIME_BIN,
@@ -34,6 +35,7 @@ import {
 } from './container-runtime.js';
 import { OneCLI } from '@onecli-sh/sdk';
 import { validateAdditionalMounts } from './mount-security.js';
+import { runMxcAgent, type MxcSpawnConfig } from './mxc-runtime.js';
 import { RegisteredGroup } from './types.js';
 
 const onecli = new OneCLI({ url: ONECLI_URL });
@@ -358,9 +360,48 @@ export async function runContainerAgent(
   const groupDir = resolveGroupFolderPath(group.folder);
   fs.mkdirSync(groupDir, { recursive: true });
 
-  const mounts = buildVolumeMounts(group, input.isMain);
   const safeName = group.folder.replace(/[^a-zA-Z0-9-]/g, '-');
   const containerName = `nanoclaw-${safeName}-${Date.now()}`;
+
+  // Use mxc runtime if configured
+  const runtime = process.env.NANOCLAW_RUNTIME ?? copilotEnv.NANOCLAW_RUNTIME;
+  if (runtime === 'mxc') {
+    const ipcDir = resolveGroupIpcPath(group.folder);
+    fs.mkdirSync(ipcDir, { recursive: true });
+    const agentRunnerDir = path.resolve('container/agent-runner');
+    const mxcConfig: MxcSpawnConfig = {
+      groupFolder: group.folder,
+      groupDir,
+      ipcDir,
+      projectDir: input.isMain ? path.resolve('.') : undefined,
+      globalDir: input.isMain ? undefined : path.resolve(GROUPS_DIR, 'main'),
+      agentRunnerDir,
+      containerName,
+      env: {
+        GITHUB_TOKEN: process.env.GITHUB_TOKEN ?? copilotEnv.GITHUB_TOKEN ?? '',
+        COPILOT_MODEL: process.env.COPILOT_MODEL ?? copilotEnv.COPILOT_MODEL ?? 'gpt-4.1',
+        NANOCLAW_SDK: process.env.NANOCLAW_SDK ?? copilotEnv.NANOCLAW_SDK ?? 'copilot',
+        NANOCLAW_CHAT_JID: input.chatJid ?? '',
+        NANOCLAW_IS_MAIN: input.isMain ? '1' : '0',
+      },
+    };
+
+    const configTimeout = group.containerConfig?.timeout || CONTAINER_TIMEOUT;
+    logger.info(
+      { group: group.name, containerName, runtime: 'mxc' },
+      'Spawning mxc sandbox agent',
+    );
+
+    // Adapt the onProcess callback (mxc doesn't return a ChildProcess)
+    const mxcOnProcess = (name: string, pid: number) => {
+      logger.debug({ containerName: name, pid }, 'mxc sandbox process started');
+    };
+
+    return runMxcAgent(mxcConfig, input, mxcOnProcess, onOutput, configTimeout);
+  }
+
+  // Docker path (default)
+  const mounts = buildVolumeMounts(group, input.isMain);
   // Main group uses the default OneCLI agent; others use their own agent.
   const agentIdentifier = input.isMain
     ? undefined

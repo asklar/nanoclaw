@@ -30,6 +30,10 @@ import {
   ensureContainerRuntimeRunning,
 } from './container-runtime.js';
 import {
+  isMxcAvailable,
+  cleanupMxcSandboxes,
+} from './mxc-runtime.js';
+import {
   getAllChats,
   getAllRegisteredGroups,
   getAllSessions,
@@ -563,8 +567,14 @@ function recoverPendingMessages(): void {
 }
 
 function ensureContainerSystemRunning(): void {
-  ensureContainerRuntimeRunning();
-  cleanupOrphans();
+  const runtime = process.env.NANOCLAW_RUNTIME;
+  if (runtime === 'mxc') {
+    logger.info('Using mxc runtime — skipping Docker check');
+    cleanupMxcSandboxes();
+  } else {
+    ensureContainerRuntimeRunning();
+    cleanupOrphans();
+  }
 }
 
 async function main(): Promise<void> {
